@@ -1,21 +1,21 @@
 module _Kmeans1D
 
-function smawk(rows, cols, lookup)
+function smawk(rows, cols, lookup, k, n)
+
     #Recursion base case
     if length(rows) == 0
-        return Dict()
+        return Vector{Int32}(undef, n)
     end
 
     ## REDUCE
-    _cols = []
+    _cols = Int32[]
     for col in cols
         while true
             if length(_cols) == 0
                 break
             end
             index = length(_cols)
-
-            if lookup[rows[index], col] >= lookup[rows[index], _cols[end]]
+            if lookup(k, rows[index], col) >= lookup(k, rows[index], _cols[end])
                 break
             end
             pop!(_cols)
@@ -27,17 +27,16 @@ function smawk(rows, cols, lookup)
         
     end
     # call recursively on odd-indexed rows
-    odd_rows = []
+    odd_rows = Int32[]
     if length(rows) > 1 
         for i in 2:2:length(rows)
             push!(odd_rows, rows[i])
         end
     end
-
-
-    result = smawk(odd_rows, _cols, lookup)
-
-    col_idx_lookup = Dict()
+    
+    result = smawk(odd_rows, _cols, lookup, k, n)
+    
+    col_idx_lookup = Dict{Int32, Int32}()
     for idx in 1:length(_cols)
         col_idx_lookup[_cols[idx]] = idx
     end
@@ -55,16 +54,16 @@ function smawk(rows, cols, lookup)
             stop = col_idx_lookup[result[rows[r + 1]]]
         end
         argmin = _cols[start]
-        min = lookup[row, argmin]
+        min = lookup(k, row, argmin)
 
         for c in start+1:stop+1
-            value = lookup[row, _cols[c]]
+            value = lookup(k, row, _cols[c])
             if (c == start) || (value<min)
                 argmin = _cols[c]
                 min = value
             end
         end
-        
+
         result[row] = argmin
         start = stop
 
@@ -72,7 +71,6 @@ function smawk(rows, cols, lookup)
 
     return result
 end
-
 
 mutable struct CostCalculator
     cumsum :: Array{Float32}
@@ -102,37 +100,31 @@ function calc(cc::CostCalculator, i, j)
     return result
 end
 
-function C_builder(C, D, k, n, cc)
-    for i in 1:n
-        for j in 1:n
-            col = min(i, j-1)
-            if col < 1
-                col = n + col
-            end
-            C[i, j] = D[k-1, col] + calc(cc, j, i)
-        end
-    end
-    return C
-end
 
+function C_function(k, i, j)
+    col = min(i, j-1)
+    if col == 0
+        col = size(D)[2] + col
+    end
+    return D[k-1, col] + calc(cost_calculator, j, i)
+end
 
 function cluster(array, n, k)
     #Sort input array and save info for de-sorting
-    sort_idx = sortperm(array)
+    sort_idx::Vector{Int32} = sortperm(array)
     undo_sort_lookup = Vector{Int32}(undef, n)
     sorted_array = Vector{Float32}(undef, n)
     for i in 1:n
         sorted_array[i] = array[sort_idx[i]]
         undo_sort_lookup[sort_idx[i]] = i 
-
     end
 
     #Set D and T using dynamic programming algorithm
-    cost_calculator = CostCalculator()
+    global cost_calculator = CostCalculator()
     build_cumsum(cost_calculator::CostCalculator, sorted_array, n)
 
 
-    D = Matrix{Float32}(undef, k, n)
+    global D = Matrix{Float32}(undef, k, n)
     T = Matrix{Int32}(undef, k, n)
 
     for i in 1:n
@@ -140,21 +132,16 @@ function cluster(array, n, k)
         T[1, i] = 1
     end
    
-    C = Matrix{Float32}(undef, n, n)
-    row_argmins = Dict{Int32, Int32}()
     for k_ in 2:k
-        #THIS IS DONE DIFFERENTLY ON C++ IMPLEMENTATION
-        C = C_builder(C, D, k_, n, cost_calculator)
-        row_argmins = smawk(1:n, 1:n, C)        
-        for i in 1:length(row_argmins)
+        row_argmins = smawk(collect(1:n), collect(1:n), C_function, k_, n)
+        for i in 1:n
             argmin = row_argmins[i]
-            min = C[i, argmin]
+            min = C_function(k_, i, argmin)
             D[k_, i] = min
             T[k_, i] = argmin
         end
 
     end
-
 
     #Extract cluster assignments by backtracking
     centroids = zeros(k)
@@ -184,9 +171,7 @@ function cluster(array, n, k)
     return centroids, clusters
 end
 
-end #end of module
-
-
+end
 
 
 
